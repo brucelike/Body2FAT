@@ -1,5 +1,5 @@
 # Body2FAT
-The Body fat
+The Body Shape can used to predict the Subcutaneous adipose tissue (SAT) and Visceral adipose tissue (VAT).
 
  [Google]
  [Runoob]
