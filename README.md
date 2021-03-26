@@ -1,15 +1,14 @@
 # Body2FAT
 The Body fat
 
-这个链接用 1 作为网址变量 [Google]
-这个链接用 runoob 作为网址变量 [Runoob]
-然后在文档的结尾为变量赋值（网址）
+ [Google]
+ [Runoob]
+
 
 
 
  [Google]: http://www.google.com/
  [Runoob]: http://www.runoob.com/
 [baidu]:http://www.baidu.com
-[我的主页]:http://www.jianchengss.com
 [image-qr-code]: https://gitee.com/jianchengss/resources/raw/master/images/weixin/mp_QR-code/Jason_pinyaxuan_8.jpg
 [image-error]: https://www.baidu.com/Jason_pinyaxuan_8.jpg
