@@ -124,6 +124,7 @@ def define_generator(image_shape):
     ds6 = decoder_block(ds5, e2, 128, dropout=False)
     ds7 = decoder_block(ds6, e1, 64, dropout=False)
     gs = Conv2DTranspose(image_shape[2], (4,4), strides=(2,2), padding='same', kernel_initializer=init)(ds7)
+    out_image_sat = Activation('tanh')(gs)
     dv1 = decoder_block(b, e7, 512)
     dv2 = decoder_block(dv1, e6, 512)
     dv3 = decoder_block(dv2, e5, 512)
@@ -133,7 +134,7 @@ def define_generator(image_shape):
     dv7 = decoder_block(dv6, e1, 64, dropout=False)
     # output
     gv = Conv2DTranspose(image_shape[2], (4,4), strides=(2,2), padding='same', kernel_initializer=init)(dv7)
-    out_image_sat = Activation('tanh')(gs)
+
     out_image_vat = Activation('tanh')(gv)
     # define model
     model = Model(in_image, [out_image_sat,out_image_vat])
@@ -146,12 +147,109 @@ def define_gan(g_model, d_model, image_shape):
     # define the source image
     in_src = Input(shape=image_shape)
     # connect the source image to the generator input
-    [gen_out_s, gen_out_v] = g_model(in_src)
+    [gen_out_sat, gen_out_vat] = g_model(in_src)
     # connect the source input and generator output to the discriminator input
-    dis_out = d_model([in_src, gen_out_s,gen_out_v])
+    dis_out = d_model([in_src, gen_out_sat,gen_out_vat])
     # src image as input, generated image and classification output
-    model = Model(in_src, [dis_out, gen_out_s,gen_out_v])
+    model = Model(in_src, [dis_out, gen_out_sat,gen_out_vat])
     # compile model
     opt = Adam(lr=0.0002, beta_1=0.5)
     model.compile(loss=['binary_crossentropy', 'mae'], optimizer=opt, loss_weights=[1,50,100])
     return model
+
+# load and prepare training images
+def load_real_samples(filename):
+    # load compressed arrays
+    data = load(filename)
+    # unpack arrays
+    X1, X2, X3, X4, X5, X6 = data['arr_0'], data['arr_1'], data['arr_2'], data['arr_3'], data['arr_4'], data['arr_5']
+    # scale from [0,255] to [-1,1]
+    X1 = (X1 - 127.5) / 127.5
+    X2 = (X2 - 127.5) / 127.5
+    X3 = (X3 - 127.5) / 127.5
+    X4 = (X4 - 127.5) / 127.5
+    X5 = (X5 - 127.5) / 127.5
+    X6 = (X6 - 127.5) / 127.5
+    return [X1, X2, X3, X4, X5, X6]
+
+# select a batch of random samples, returns images and target
+def generate_real_samples(dataset, n_samples, patch_shape):
+    # unpack dataset
+    im_sp, im_s,im_v = dataset
+    # choose random instances
+    ix = randint(0, im_sp.shape[0], n_samples)
+    # retrieve selected images
+    X1, X2 ,X3= im_sp[ix], im_s[ix],im_v[ix]
+    # generate 'real' class labels (1)
+    y = ones((n_samples, patch_shape, patch_shape, 1))
+    return [X1, X2, X3], y
+
+# generate a batch of images, returns images and targets
+def generate_fake_samples(g_model, samples, patch_shape):
+    # generate fake instance
+    gen_sat,gen_vat = g_model.predict(samples)
+    # create 'fake' class labels (0)
+    y = zeros((len(gen_sat), patch_shape, patch_shape, 1))
+    return gen_sat,gen_vat, y
+
+# generate samples and save as a plot and save the model
+def summarize_performance(step, g_model, dataset, n_samples=3):
+    # save the generator model
+    filename1 = 'model_%05d.h5' % (step)
+    g_model.save(filename1)
+    print('>Saved: %s' % (filename1))
+
+# train pix2pix models
+def train(d_model, g_model, gan_model, dataset, n_epochs=10, n_batch=1):
+    # determine the output square shape of the discriminator
+    n_patch = d_model.output_shape[1]
+    # unpack dataset
+    train_bs, _, _   = dataset
+    # calculate the number of batches per training epoch
+    bat_per_epo = int(len(train_bs) / n_batch)
+    # calculate the number of training iterations
+    n_steps = bat_per_epo * n_epochs
+    # manually enumerate epochs
+    for i in range(n_steps):
+        # select a batch of real samples
+        [im_src, real_sat,real_vat], y_real = generate_real_samples(dataset, n_batch, n_patch)
+        # generate a batch of fake samples
+        gen_sat, gen_vat,y_fake = generate_fake_samples(g_model, im_src, n_patch)
+        # update discriminator for real samples
+        d_loss1 = d_model.train_on_batch([im_src, real_sat,real_vat], y_real)
+        # update discriminator for generated samples
+        d_loss2 = d_model.train_on_batch([im_src, gen_sat,gen_vat], y_fake)
+        # update the generator
+        g_loss, _, _ = gan_model.train_on_batch(im_src, [y_real, gen_sat,gen_vat])
+        # summarize performance
+        print('>%d, d1[%.3f] d2[%.3f] g[%.3f]' % (i+1, d_loss1, d_loss2, g_loss))
+        print('%d' % (bat_per_epo))
+        # summarize model performance
+        #per_epo=1
+        if (i+1) % (bat_per_epo) == 0:
+              #summarize_performance((i+1)/(bat_per_epo * 10) , g_model, dataset)
+              summarize_performance((i+1)/(bat_per_epo), g_model, dataset)
+
+
+
+#%%
+# load image data
+filename='data_split.npz'
+dataset = load_real_samples(filename)
+print('Loaded', dataset[0].shape, dataset[1].shape,dataset[2].shape)
+bs_train=(dataset[0])
+sat_train=(dataset[1])
+vat_train=(dataset[2])
+bs_test=(dataset[3])
+sat_test=(dataset[4])
+vat_test=(dataset[5])
+traindataset=[bs_train,sat_train,vat_train]
+# define input shape based on the loaded dataset
+image_shape = dataset[0].shape[1:]
+# define the modelss
+d_model = define_discriminator(image_shape)
+g_model = define_generator(image_shape)
+# define the composite model
+gan_model = define_gan(g_model, d_model, image_shape)
+# # train model
+train(d_model, g_model, gan_model,traindataset,n_epochs=200)
